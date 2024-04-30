@@ -58,6 +58,8 @@
   (match e
     ;; literals
     [(? integer? i) #:when (and (>= i (- (expt 2 63))) (< i (expt 2 63))) #t]
+    ['#t #t]
+    ['#t #f]
     ['true #t]
     ['false #t]
     ;; applications of primitives, our language has no lambdas
@@ -92,8 +94,10 @@
   (match e
     ;; literals
     [(? integer? i) #:when (and (>= i (- (expt 2 63))) (< i (expt 2 63))) #t]
+    ['#t #t]
+    ['#f #t]
     ['true #t]
-    ['false #t]
+    ['false #t] ;; should be true.
     ;; variables, bound in let
     [(? symbol? x) #t]
     ;; applications of primitives, our language has no lambdas
@@ -122,33 +126,38 @@
   (match e
     ;; literals
     [(? integer? i) i]
-    ['true 'todo]
-    ['false 'todo]
-    [(? symbol? x) 'todo]
-    [`(,(? bop? bop) ,e0 ,e1) 'todo]
-    [`(,(? uop? uop) ,e) 'todo]
+    ['#t 1]
+    ['#f 0]
+    ['true e]
+    ['false e]
+    [(? symbol? x) x]
+    [`(,(? bop? bop) ,e0 ,e1) `(,bop ,(ifarith->ifarith-tiny e0) ,(ifarith->ifarith-tiny e1))]
+    [`(,(? uop? uop) ,e) `(,uop ,(ifarith->ifarith-tiny e))]
     ;; 0-binding case
-    [`(let* () ,e) 'todo]
+    [`(let* () ,e) (ifarith->ifarith-tiny e)]
     ;; 1+-binding case
-    [`(let* ([,(? symbol? x0) ,e0]) ,e-body)
-     'todo]
-    [`(let* ([,(? symbol? x0) ,e0] ,rest-binding-pairs ...) ,e-body)
-     'todo]
+    [`(let* ([,(? symbol? x0) ,e0]) ,e-body) `(let ([,x0 ,e0]) ,(ifarith->ifarith-tiny e-body))]
+    [`(let* ([,(? symbol? x0) ,e0] ,rest-binding-pairs ...) ,e-body) `(let ([,x0 ,e0]) ,(ifarith->ifarith-tiny `(let* ,rest-binding-pairs ,e-body)))]
+    
+    
     ;; print an arbitrary expression (must be a number at runtime)
     [`(print ,_)
-     'todo]
+     e]
     ;; and/or, with short-circuiting semantics
-    [`(and ,e0) 'todo]
-    [`(and ,e0 ,es ...) 'todo]
-    [`(or ,e0) 'todo]
-    [`(or ,e0 ,es ...) 'todo]
+    [`(and ,e0) (ifarith->ifarith-tiny e0)]
+    [`(and ,e0 ,es ...) (ifarith->ifarith-tiny `(if ,e0 (and ,@es) 0))]
+    [`(or ,e0) (ifarith->ifarith-tiny e0)]
+    [`(or ,e0 ,es ...) (ifarith->ifarith-tiny `(if ,e0 true (or ,es)))]
     ;; if argument is 0, false, otherwise true
-    [`(if ,e0 ,e1 ,e2) 'todo]
+    [`(if ,e0 ,e1 ,e2) `(if ,(ifarith->ifarith-tiny e0)
+                            ,(ifarith->ifarith-tiny e1)
+                            ,(ifarith->ifarith-tiny e2))]
     ;; cond where the last case is else
     [`(cond [else ,(? ifarith? else-body)])
-     'todo]
+     (ifarith->ifarith-tiny else-body)]
     [`(cond [,c0 ,e0] ,rest ...)
-     'todo]))
+     (ifarith->ifarith-tiny `(if ,c0 ,e0 (cond ,@rest)))]))
+     ;; in racket a zero isn't neccisarily a false.
 
 ;; Stage 3: Administrative Normal Form (ANF)
 ;; 
@@ -176,6 +185,8 @@
     (match M
       [(? lit? l) (let ([t (gensym "x")]) `(let ([,t ,l]) ,(k t)))]
       [(? value?) (k M)]
+      ['#t (k 1)] ;; for true to true num rep.
+      ['#f (k 0)] ;; for flase to false
       [`(if ,e0 ,e1 ,e2)
        (normalize-name e0 (lambda (t) (k `(if ,t ,(normalize-term e1) ,(normalize-term e2)))))]
       [`(let ([,x ,e]) ,e-b)
@@ -292,7 +303,8 @@
        (define x (gensym "zero"))
        (append `(((label ,my-lab) (mov-lit ,x 0)) 
                  (cmp ,xg ,x)
-                 (jz ,(label compilation-of-et))
+                 (jnz ,(label compilation-of-et)) ;; should probably be jnz...?
+                 ;; if we jump when zero flag is up, 
                  (jmp ,(label compilation-of-ef))) 
                ;; notice that the compilation of et/ef must end in a
                ;; (exit) mark so that we don't "fall through" from the
@@ -352,6 +364,7 @@
     (match i
       [`((label ,l) ,i) (labels-used i)]
       [`(jmp ,l) (set l)]
+      [`(jnz ,l) (set l)]
       [`(jz ,l) (set l)]
       [`(call ,l) (set l)]
       [`(,op ,ops ...) (set)]))
@@ -378,6 +391,7 @@
          (call ,(what-is-printf)))]
       [`(call ,f) `((call ,f))]
       [`(jmp ,f) `((jmp ,f))]
+      [`(jnz ,f) `((jnz ,f))]
       [`(jz ,f) `((jz ,f))]
       ;; mul needs to go in rax
       #;
@@ -435,15 +449,18 @@
         (format "~a:" name)
         (apply string-append (map render-instr instrs)))]))
   ;; include a preamble
-  (displayln "section .data\n\tint_format db \"%ld\",10,0\n\n")
-  (displayln (format "\tglobal _main\n\textern ~a\nsection .text\n\n" (what-is-printf)))
+  ;; need to upload noahs code for this <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<,,,
+  (displayln (format "\tglobal _start\n\textern ~a\nsection .text\n\n" (what-is-printf)))
+  ;; change above to global _start for my Linux machine.
   (displayln (print-function `(function (_start)
                                         (call ,(what-is-main))
                              (mov "rax" "60")
                              (xor "rdi" "rdi")
                              syscall))) 
   (displayln "\n")
-  (displayln (print-function (first x86)))) ;; only print the first (main) for now
+  (displayln (print-function (first x86)))
+  (displayln "section .data\n\tint_format db \"%ld\",10,0\n\n")
+  ) ;; only print the first (main) for now
 
 
 ;;
@@ -470,8 +487,8 @@
           (displayln (format "(Assemble on Mac, requires nasm:)\n\tnasm -fmacho64 ~a" file-to-write))
           (displayln (format "(Link on Mac, hopefully)\n\tld ~a -o ~a -macosx_version_min 11.0 -L /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/lib -lSystem" object-file exe-file)))
         (begin
-          (displayln (format "(Assemble on Linux, requires nasm)\n\tnasm ~a" file-to-write))
-          (displayln (format "(Link on Mac, hopefully)\n\tld ~a -o ~a" object-file exe-file))))))
+          (displayln (format "(Assemble on Linux, requires nasm)\n\tnasm -felf64 ~a" file-to-write))
+          (displayln (format "(Link on Mac, hopefully)\n\tld -dynamic-linker /lib64/ld-linux-x86-64.so.2 ~a -o ~a -lc" object-file exe-file))))))
 
 ;; compile from ifarith
 (define (compile-ifa)

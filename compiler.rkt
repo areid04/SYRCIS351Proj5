@@ -1,3 +1,13 @@
+;>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+;If you are a Mac USER: 
+;change the refernse of global _start on line 459 to global _main
+;Changes had to be made for Linux users linking to libraries.
+;;
+;;
+;>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>.
+
+
+
 ;; Project 5
 ;; Compiler from IfArith |--> x86-64
 #lang racket
@@ -267,7 +277,7 @@
 ;; turn it into a linearized list of instructions.
 (define (anf->ir-virtual e)
   (define (name->op op)
-    (hash-ref (hash '* 'imul '+ 'add '- 'sub) op))
+    (hash-ref (hash '* 'imul '+ 'add '- 'sub 'not 'not) op))
   ;; helper function which does the bulk of the work, labels
   ;; everything in the return value.
   (define (linearize e)
@@ -278,8 +288,8 @@
       ;; ensure that these points all branch to an "exit" node.
       [`(print ,x)
        `(((label ,my-lab) (print ,x)) (return 0))]
-      #;[(? symbol? x) `((mov-rax ,x) (exit))]
-      #;[(? integer? i) `((mov-rax ,i) (exit))]
+      ;;[(? symbol? x) `((mov-rax ,x) (exit))]
+      ;;[(? integer? i) `((mov-rax ,i) (exit))]
       [(? value? v) `((return ,v))]
       ;; the rest of the forms either (a) contain explicit branches,
       ;; or (b) fallthrough to the rest.
